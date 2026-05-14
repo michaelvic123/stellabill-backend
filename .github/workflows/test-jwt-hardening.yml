@@ -9,11 +9,14 @@ on:
       - "internal/auth/**"
       - "go.mod"
       - "go.sum"
+      - ".github/workflows/test-jwt-hardening.yml"
   pull_request:
     branches:
       - main
     paths:
       - "internal/auth/**"
+      - ".github/workflows/test-jwt-hardening.yml"
+  workflow_dispatch:
 
 jobs:
   test:
