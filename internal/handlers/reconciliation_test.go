@@ -47,6 +47,9 @@ func (f *failingStore) SaveReports(_ []reconciliation.Report) error { return f.e
 func (f *failingStore) ListReports() ([]reconciliation.Report, error) {
 	return nil, nil
 }
+func (f *failingStore) ListReportsByTenant(_ string) ([]reconciliation.Report, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helper: build a router for reconciliation tests
@@ -63,6 +66,30 @@ func buildReconcileRouter(
 	r.POST("/reconcile",
 		auth.RequirePermission(auth.PermManageReconciliation),
 		NewReconcileHandler(adapter, store),
+	)
+	return r
+}
+
+func setupReconcileRouter(
+	adapter reconciliation.Adapter,
+	store reconciliation.Store,
+	tenantID string,
+	role string,
+) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("callerID", "test-caller")
+		c.Set("tenantID", tenantID)
+		if role != "" {
+			c.Set(auth.RoleContextKey, auth.Role(role))
+			c.Request.Header.Set("X-Role", role)
+		}
+		c.Next()
+	})
+	r.GET("/admin/reports",
+		auth.RequirePermission(auth.PermManageReconciliation),
+		NewListReportsHandler(store),
 	)
 	return r
 }

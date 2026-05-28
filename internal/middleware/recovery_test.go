@@ -11,15 +11,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const internalErrorMessage = "internal server error"
+const testInternalErrorMessage = "Internal server error"
 
 type testRuntimeErr string
 
-type ErrorResponse struct {
+type TestErrorResponse struct {
 	Error   string    `json:"error"`
 	Code    string    `json:"code"`
-	Request string    `json:"request"`
-	Time    time.Time `json:"time"`
+	Request string    `json:"request_id"`
+	Time    time.Time `json:"timestamp"`
 }
 
 func TestRecoveryMiddleware(t *testing.T) {
@@ -58,7 +58,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 			var response map[string]interface{}
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			assert.NoError(t, err)
-			assert.Equal(t, internalErrorMessage, response["error"])
+			assert.Equal(t, testInternalErrorMessage, response["error"])
 		})
 	}
 }
@@ -85,7 +85,7 @@ func TestRecoveryWithRequestID(t *testing.T) {
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Equal(t, internalErrorMessage, response["error"])
+	assert.Equal(t, testInternalErrorMessage, response["error"])
 }
 
 func TestRecoveryGeneratesRequestID(t *testing.T) {
@@ -106,7 +106,7 @@ func TestRecoveryGeneratesRequestID(t *testing.T) {
 
 	assert.Equal(t, 500, w.Code)
 
-	var resp ErrorResponse
+	var resp TestErrorResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, resp.Request, "request_id must be generated when none provided")

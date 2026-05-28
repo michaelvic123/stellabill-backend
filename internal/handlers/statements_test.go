@@ -15,7 +15,7 @@ import (
 
 // ── mock ─────────────────────────────────────────────────────────────────────
 
-type mockStatementService struct {
+type mockStatementsTestService struct {
 	detail       *service.StatementDetail
 	listDetail   *service.ListStatementsDetail
 	warnings     []string
@@ -25,11 +25,11 @@ type mockStatementService struct {
 	capturedCust string
 }
 
-func (m *mockStatementService) GetDetail(_ context.Context, _, _ string) (*service.StatementDetail, []string, error) {
+func (m *mockStatementsTestService) GetDetail(_ context.Context, _ string, _ []string, _ string) (*service.StatementDetail, []string, error) {
 	return m.detail, m.warnings, m.err
 }
 
-func (m *mockStatementService) ListByCustomer(_ context.Context, _ string, customerID string, q repository.StatementQuery) (*service.ListStatementsDetail, int, []string, error) {
+func (m *mockStatementsTestService) ListByCustomer(_ context.Context, _ string, _ []string, customerID string, q repository.StatementQuery) (*service.ListStatementsDetail, int, []string, error) {
 	m.capturedQ = q
 	m.capturedCust = customerID
 	return m.listDetail, m.count, m.warnings, m.err
@@ -63,7 +63,7 @@ func decodeBody(t *testing.T, w *httptest.ResponseRecorder) map[string]interface
 // ── GetStatement tests ───────────────────────────────────────────────────────
 
 func TestGetStatement_MissingCallerID_Returns401(t *testing.T) {
-	r := stmtRouter(&mockStatementService{}, false)
+	r := stmtRouter(&mockStatementsTestService{}, false)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/statements/550e8400-e29b-41d4-a716-446655440001", nil)
@@ -79,7 +79,7 @@ func TestGetStatement_MissingCallerID_Returns401(t *testing.T) {
 }
 
 func TestGetStatement_EmptyID_Returns400(t *testing.T) {
-	r := stmtRouter(&mockStatementService{}, true)
+	r := stmtRouter(&mockStatementsTestService{}, true)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/statements/%20", nil)
@@ -95,7 +95,7 @@ func TestGetStatement_EmptyID_Returns400(t *testing.T) {
 }
 
 func TestGetStatement_ErrNotFound_Returns404(t *testing.T) {
-	svc := &mockStatementService{err: service.ErrNotFound}
+	svc := &mockStatementsTestService{err: service.ErrNotFound}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -112,7 +112,7 @@ func TestGetStatement_ErrNotFound_Returns404(t *testing.T) {
 }
 
 func TestGetStatement_ErrDeleted_Returns410(t *testing.T) {
-	svc := &mockStatementService{err: service.ErrDeleted}
+	svc := &mockStatementsTestService{err: service.ErrDeleted}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -129,7 +129,7 @@ func TestGetStatement_ErrDeleted_Returns410(t *testing.T) {
 }
 
 func TestGetStatement_ErrForbidden_Returns403(t *testing.T) {
-	svc := &mockStatementService{err: service.ErrForbidden}
+	svc := &mockStatementsTestService{err: service.ErrForbidden}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -146,7 +146,7 @@ func TestGetStatement_ErrForbidden_Returns403(t *testing.T) {
 }
 
 func TestGetStatement_UnknownError_Returns500(t *testing.T) {
-	svc := &mockStatementService{err: errors.New("db connection lost")}
+	svc := &mockStatementsTestService{err: errors.New("db connection lost")}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -175,7 +175,7 @@ func TestGetStatement_HappyPath_Returns200WithEnvelope(t *testing.T) {
 		Kind:           "invoice",
 		Status:         "paid",
 	}
-	svc := &mockStatementService{detail: detail}
+	svc := &mockStatementsTestService{detail: detail}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -225,7 +225,7 @@ func TestGetStatement_HappyPath_Returns200WithEnvelope(t *testing.T) {
 
 func TestGetStatement_HappyPath_WarningsIncluded(t *testing.T) {
 	detail := &service.StatementDetail{ID: "550e8400-e29b-41d4-a716-446655440001"}
-	svc := &mockStatementService{detail: detail, warnings: []string{"subscription missing"}}
+	svc := &mockStatementsTestService{detail: detail, warnings: []string{"subscription missing"}}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -248,7 +248,7 @@ func TestGetStatement_HappyPath_WarningsIncluded(t *testing.T) {
 // ── ListStatements tests ─────────────────────────────────────────────────────
 
 func TestListStatements_MissingCallerID_Returns401(t *testing.T) {
-	r := stmtRouter(&mockStatementService{}, false)
+	r := stmtRouter(&mockStatementsTestService{}, false)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/statements", nil)
@@ -260,7 +260,7 @@ func TestListStatements_MissingCallerID_Returns401(t *testing.T) {
 }
 
 func TestListStatements_ErrForbidden_Returns403(t *testing.T) {
-	svc := &mockStatementService{err: service.ErrForbidden}
+	svc := &mockStatementsTestService{err: service.ErrForbidden}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -273,7 +273,7 @@ func TestListStatements_ErrForbidden_Returns403(t *testing.T) {
 }
 
 func TestListStatements_UnknownError_Returns500(t *testing.T) {
-	svc := &mockStatementService{err: errors.New("db down")}
+	svc := &mockStatementsTestService{err: errors.New("db down")}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestListStatements_HappyPath_Returns200WithPagination(t *testing.T) {
 		{ID: "stmt-1", Kind: "invoice", Status: "paid"},
 		{ID: "stmt-2", Kind: "invoice", Status: "pending"},
 	}
-	svc := &mockStatementService{
+	svc := &mockStatementsTestService{
 		listDetail: &service.ListStatementsDetail{Statements: stmts},
 		count:      2,
 	}
@@ -342,7 +342,7 @@ func TestListStatements_HappyPath_Returns200WithPagination(t *testing.T) {
 }
 
 func TestListStatements_DefaultPagination(t *testing.T) {
-	svc := &mockStatementService{
+	svc := &mockStatementsTestService{
 		listDetail: &service.ListStatementsDetail{Statements: []*service.StatementDetail{}},
 		count:      0,
 	}
@@ -368,7 +368,7 @@ func TestListStatements_DefaultPagination(t *testing.T) {
 }
 
 func TestListStatements_QueryFiltersPassedToService(t *testing.T) {
-	svc := &mockStatementService{
+	svc := &mockStatementsTestService{
 		listDetail: &service.ListStatementsDetail{Statements: []*service.StatementDetail{}},
 		count:      0,
 	}
@@ -407,7 +407,7 @@ func TestListStatements_QueryFiltersPassedToService(t *testing.T) {
 }
 
 func TestListStatements_InvalidPageParams_Returns400(t *testing.T) {
-	svc := &mockStatementService{}
+	svc := &mockStatementsTestService{}
 	r := stmtRouter(svc, true)
 
 	w := httptest.NewRecorder()
@@ -420,7 +420,7 @@ func TestListStatements_InvalidPageParams_Returns400(t *testing.T) {
 }
 
 func TestListStatements_EmptyStatements_ReturnsEmptyArray(t *testing.T) {
-	svc := &mockStatementService{
+	svc := &mockStatementsTestService{
 		listDetail: &service.ListStatementsDetail{Statements: []*service.StatementDetail{}},
 		count:      0,
 	}
@@ -443,7 +443,7 @@ func TestListStatements_EmptyStatements_ReturnsEmptyArray(t *testing.T) {
 }
 
 func TestListStatements_WarningsIncluded(t *testing.T) {
-	svc := &mockStatementService{
+	svc := &mockStatementsTestService{
 		listDetail: &service.ListStatementsDetail{Statements: []*service.StatementDetail{}},
 		count:      0,
 		warnings:   []string{"partial results"},

@@ -288,3 +288,10 @@ func RedactStringField(fieldName, value string) string {
 	}
 	return MaskPII(value)
 }
+
+func RedactError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(MaskPII(err.Error()))
+}

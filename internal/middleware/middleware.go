@@ -40,16 +40,7 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 
 
 
-func Recovery(logger *log.Logger) gin.HandlerFunc {
-	return gin.CustomRecovery(func(c *gin.Context, recovered any) {
-		requestID, _ := c.Get(RequestIDKey)
-		logger.Printf("panic recovered request_id=%v err=%v", requestID, recovered)
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"error":      "internal server error",
-			"request_id": requestID,
-		})
-	})
-}
+
 
 func Logging(logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -69,7 +60,7 @@ func Logging(logger *log.Logger) gin.HandlerFunc {
 			requestID,
 			time.Since(start).Round(time.Millisecond),
 		)
-		logger.SafePrintf("%s", msg)
+		logger.Printf("%s", msg)
 	}
 }
 
@@ -154,3 +145,5 @@ func DeprecationHeaders() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+

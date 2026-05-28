@@ -3,26 +3,37 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"stellarbill-backend/internal/cache"
 )
 
+type cacheEnvelope struct {
+	Data     []byte    `json:"data"`
+	StoredAt time.Time `json:"stored_at"`
+}
+
 // CachedPlanRepo decorates a PlanRepository with a read-through cache.
 // It implements cache.Purgeable so the admin purge endpoint can flush it.
 type CachedPlanRepo struct {
-	backend PlanRepository
-	cache   cache.Cache
-	ttl     time.Duration
-
-	hits   uint64
-	misses uint64
+	backend       PlanRepository
+	cache         cache.Cache
+	ttl           time.Duration
+	hits          uint64
+	misses        uint64
+	stales        uint64
+	invalidatedAt sync.Map
 }
 
 // NewCachedPlanRepo constructs a CachedPlanRepo.
 func NewCachedPlanRepo(backend PlanRepository, c cache.Cache, ttl time.Duration) *CachedPlanRepo {
 	return &CachedPlanRepo{backend: backend, cache: c, ttl: ttl}
+}
+
+func (cpr *CachedPlanRepo) listKey() string {
+	return "plan:list:all"
 }
 
 func (cpr *CachedPlanRepo) cacheKey(id string) string {
@@ -35,12 +46,25 @@ func (cpr *CachedPlanRepo) FindByID(ctx context.Context, id string) (*PlanRow, e
 	key := cpr.cacheKey(id)
 	if cpr.cache != nil {
 		if val, err := cpr.cache.Get(ctx, key); err == nil && val != nil {
-			var pr PlanRow
-			if err := json.Unmarshal(val, &pr); err == nil {
-				atomic.AddUint64(&cpr.hits, 1)
-				return &pr, nil
+			var env cacheEnvelope
+			if err := json.Unmarshal(val, &env); err == nil {
+				stale := false
+				if invTimeVal, ok := cpr.invalidatedAt.Load(key); ok {
+					if invTime, ok := invTimeVal.(time.Time); ok && env.StoredAt.Before(invTime) {
+						stale = true
+					}
+				}
+				if stale {
+					atomic.AddUint64(&cpr.stales, 1)
+					_ = cpr.cache.Delete(ctx, key)
+				} else {
+					var pr PlanRow
+					if err := json.Unmarshal(env.Data, &pr); err == nil {
+						atomic.AddUint64(&cpr.hits, 1)
+						return &pr, nil
+					}
+				}
 			}
-			// on unmarshal errors, fallthrough to backend
 		}
 	}
 	atomic.AddUint64(&cpr.misses, 1)
@@ -49,8 +73,15 @@ func (cpr *CachedPlanRepo) FindByID(ctx context.Context, id string) (*PlanRow, e
 		return nil, err
 	}
 	if cpr.cache != nil {
-		if b, err := json.Marshal(pr); err == nil {
-			_ = cpr.cache.Set(ctx, key, b, cpr.ttl)
+		prBytes, err := json.Marshal(pr)
+		if err == nil {
+			env := cacheEnvelope{
+				Data:     prBytes,
+				StoredAt: time.Now(),
+			}
+			if envBytes, err := json.Marshal(env); err == nil {
+				_ = cpr.cache.Set(ctx, key, envBytes, cpr.ttl)
+			}
 		}
 	}
 	return pr, nil
@@ -61,10 +92,24 @@ func (cpr *CachedPlanRepo) List(ctx context.Context) ([]*PlanRow, error) {
 	key := "plan:list:all"
 	if cpr.cache != nil {
 		if val, err := cpr.cache.Get(ctx, key); err == nil && val != nil {
-			var out []*PlanRow
-			if err := json.Unmarshal(val, &out); err == nil {
-				atomic.AddUint64(&cpr.hits, 1)
-				return out, nil
+			var env cacheEnvelope
+			if err := json.Unmarshal(val, &env); err == nil {
+				stale := false
+				if invTimeVal, ok := cpr.invalidatedAt.Load(key); ok {
+					if invTime, ok := invTimeVal.(time.Time); ok && env.StoredAt.Before(invTime) {
+						stale = true
+					}
+				}
+				if stale {
+					atomic.AddUint64(&cpr.stales, 1)
+					_ = cpr.cache.Delete(ctx, key)
+				} else {
+					var out []*PlanRow
+					if err := json.Unmarshal(env.Data, &out); err == nil {
+						atomic.AddUint64(&cpr.hits, 1)
+						return out, nil
+					}
+				}
 			}
 		}
 	}
@@ -74,8 +119,15 @@ func (cpr *CachedPlanRepo) List(ctx context.Context) ([]*PlanRow, error) {
 		return nil, err
 	}
 	if cpr.cache != nil {
-		if b, err := json.Marshal(out); err == nil {
-			_ = cpr.cache.Set(ctx, key, b, cpr.ttl)
+		outBytes, err := json.Marshal(out)
+		if err == nil {
+			env := cacheEnvelope{
+				Data:     outBytes,
+				StoredAt: time.Now(),
+			}
+			if envBytes, err := json.Marshal(env); err == nil {
+				_ = cpr.cache.Set(ctx, key, envBytes, cpr.ttl)
+			}
 		}
 	}
 	return out, nil
@@ -86,14 +138,19 @@ func (cpr *CachedPlanRepo) Delete(ctx context.Context, id string) error {
 	if cpr.cache == nil {
 		return nil
 	}
-	_ = cpr.cache.Delete(ctx, cpr.cacheKey(id))
+	key := cpr.cacheKey(id)
+	now := time.Now()
+	cpr.invalidatedAt.Store(key, now)
+	cpr.invalidatedAt.Store("plan:list:all", now)
+
+	_ = cpr.cache.Delete(ctx, key)
 	_ = cpr.cache.Delete(ctx, "plan:list:all")
 	return nil
 }
 
-// Metrics returns hit/miss counters for testing/monitoring.
-func (cpr *CachedPlanRepo) Metrics() (hits uint64, misses uint64) {
-	return atomic.LoadUint64(&cpr.hits), atomic.LoadUint64(&cpr.misses)
+// Metrics returns hit/miss/stale counters for testing/monitoring.
+func (cpr *CachedPlanRepo) Metrics() (hits uint64, misses uint64, stales uint64) {
+	return atomic.LoadUint64(&cpr.hits), atomic.LoadUint64(&cpr.misses), atomic.LoadUint64(&cpr.stales)
 }
 
 // --- cache.Purgeable implementation ---
@@ -118,6 +175,7 @@ func (cpr *CachedPlanRepo) Flush(ctx context.Context) (int, error) {
 func (cpr *CachedPlanRepo) ResetMetrics() {
 	atomic.StoreUint64(&cpr.hits, 0)
 	atomic.StoreUint64(&cpr.misses, 0)
+	atomic.StoreUint64(&cpr.stales, 0)
 }
 
 // Namespace returns the human-readable label for this cache namespace.

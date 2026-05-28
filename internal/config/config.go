@@ -87,6 +87,7 @@ type Config struct {
 	// Tracing configuration
 	TracingExporter    string
 	TracingServiceName string
+	SecurityFrameAncestors string
 	// CORS configuration
 }
 
@@ -169,6 +170,7 @@ var optionalEnvVars = map[string]string{
 	"MAX_REQUEST_SIZE":            "1048576",
 	"MAX_GZIP_UNCOMPRESSED":       "10485760",
 	"MAX_GZIP_RATIO":              "10.0",
+	"SECURITY_FRAME_ANCESTORS":    "'none'",
 }
 
 // Option configures the Load function.
@@ -220,6 +222,7 @@ func Load(opts ...Option) (Config, error) {
 		TracingExporter:     getEnv("TRACING_EXPORTER", "stdout"),
 		TracingServiceName:  getEnv("TRACING_SERVICE_NAME", "stellabill-backend"),
 		AllowedOrigins:      getEnv("ALLOWED_ORIGINS", ""),
+		SecurityFrameAncestors: getEnv("SECURITY_FRAME_ANCESTORS", "'none'"),
 	}
 
 	// Resolve secrets through the provider
@@ -348,6 +351,12 @@ func (c *Config) validate(resolvedSecrets map[string]string, secretErrs map[stri
 		} else {
 			c.AdminToken = token
 		}
+	}
+
+	if val := os.Getenv("SECURITY_FRAME_ANCESTORS"); val != "" {
+		c.SecurityFrameAncestors = val
+	} else {
+		c.SecurityFrameAncestors = "'none'"
 	}
 
 	// Validate optional MAX_HEADER_BYTES

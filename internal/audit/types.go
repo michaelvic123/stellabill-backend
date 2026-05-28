@@ -52,3 +52,17 @@ func GetActor(ctx context.Context) string {
 	}
 	return "anonymous"
 }
+
+// FromContext extracts the actor from the context and returns if it was set.
+func FromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	if v := ctx.Value(actorKey); v != nil {
+		if s, ok := v.(string); ok {
+			return s, true
+		}
+	}
+	return "", false
+}
+

@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"stellarbill-backend/internal/pagination"
+	"stellarbill-backend/internal/repository"
 )
 
 type Plan struct {
@@ -15,6 +15,10 @@ type Plan struct {
 	Interval    string `json:"interval"`
 	Description string `json:"description,omitempty"`
 }
+
+func (p Plan) GetID() string        { return p.ID }
+func (p Plan) GetSortValue() string { return p.Name }
+
 
 func (h *Handler) ListPlans(c *gin.Context) {
 	plans, err := h.Plans.ListPlans(c)

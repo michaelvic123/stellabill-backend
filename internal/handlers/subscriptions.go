@@ -3,9 +3,11 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"stellarbill-backend/internal/pagination"
+	"stellarbill-backend/internal/requestparams"
 	"stellarbill-backend/internal/service"
 )
 
@@ -26,7 +28,7 @@ func (h *Handler) ListSubscriptions(c *gin.Context) {
 	limitStr := c.Query("limit")
 	limit, err := pagination.ParseLimit(limitStr, 10)
 	if err != nil {
-		RespondWithValidationError(c, "Invalid pagination limit", map[string]interface{}{
+		RespondWithErrorDetails(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Invalid pagination limit", map[string]interface{}{
 			"reason": err.Error(),
 		})
 		return
@@ -85,7 +87,7 @@ func NewChangeSubscriptionStatusHandler(svc service.SubscriptionService) gin.Han
 
 		var req changeSubscriptionStatusRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			RespondWithValidationError(c, "Invalid request body", map[string]interface{}{
+			RespondWithErrorDetails(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Invalid request body", map[string]interface{}{
 				"reason": err.Error(),
 			})
 			return
@@ -176,27 +178,7 @@ func getRequiredStringContextValue(c *gin.Context, key string, missingMessage st
 		return "", false
 	}
 
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// TODO: fetch current subscription from DB
-	currentStatus := "active" // placeholder
-
-	if err := subscriptions.CanTransition(currentStatus, payload.Status); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	// TODO: persist update
-
-	c.JSON(http.StatusOK, gin.H{
-		"id":     id,
-		"status": payload.Status,
-	})
+	return str, true
 }
 
 // ListSubscriptions is a package-level helper for backwards compatibility / benchmark tests.

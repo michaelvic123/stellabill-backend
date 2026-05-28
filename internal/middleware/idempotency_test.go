@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -268,6 +265,17 @@ func TestIdempotencyMiddleware_TenantAndCallerIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 
+	// Mock authentication middleware to extract header values into context
+	r.Use(func(c *gin.Context) {
+		if tid := c.GetHeader("X-Tenant-ID"); tid != "" {
+			c.Set("tenantID", tid)
+		}
+		if cid := c.GetHeader("X-Caller-ID"); cid != "" {
+			c.Set("callerID", cid)
+		}
+		c.Next()
+	})
+
 	store := middleware.NewInMemoryIdempotencyStore()
 	r.Use(middleware.Idempotency(store))
 
@@ -280,33 +288,20 @@ func TestIdempotencyMiddleware_TenantAndCallerIsolation(t *testing.T) {
 	// User 1 on Tenant 1
 	req1 := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString("{}"))
 	req1.Header.Set("Idempotency-Key", "iso-key")
+	req1.Header.Set("X-Tenant-ID", "tenant-1")
+	req1.Header.Set("X-Caller-ID", "caller-1")
 	w1 := httptest.NewRecorder()
-
-	r.ServeHTTP(w1, func() *httptest.ResponseRecorder {
-		// Mock authentication context
-		ctx, _ := gin.CreateTestContext(w1)
-		ctx.Request = req1
-		ctx.Set("tenantID", "tenant-1")
-		ctx.Set("callerID", "caller-1")
-		r.ServeHTTP(w1, req1)
-		return w1
-	}())
+	r.ServeHTTP(w1, req1)
 
 	assert.Equal(t, http.StatusOK, w1.Code)
 
 	// User 2 on Tenant 2 with the same Idempotency-Key
 	req2 := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString("{}"))
 	req2.Header.Set("Idempotency-Key", "iso-key")
+	req2.Header.Set("X-Tenant-ID", "tenant-2")
+	req2.Header.Set("X-Caller-ID", "caller-2")
 	w2 := httptest.NewRecorder()
-
-	r.ServeHTTP(w2, func() *httptest.ResponseRecorder {
-		ctx, _ := gin.CreateTestContext(w2)
-		ctx.Request = req2
-		ctx.Set("tenantID", "tenant-2")
-		ctx.Set("callerID", "caller-2")
-		r.ServeHTTP(w2, req2)
-		return w2
-	}())
+	r.ServeHTTP(w2, req2)
 
 	// Should execute the handler because they are scoped to different users/tenants
 	assert.Equal(t, http.StatusOK, w2.Code)

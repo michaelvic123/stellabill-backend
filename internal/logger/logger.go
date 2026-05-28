@@ -26,3 +26,7 @@ func Init() {
 		Log.SetLevel(logrus.InfoLevel)
 	}
 }
+
+func SafePrintf(format string, args ...interface{}) {
+	Log.Printf(format, args...)
+}

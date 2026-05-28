@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"stellarbill-backend/internal/auth"
+	"stellarbill-backend/internal/cache"
 	"stellarbill-backend/internal/config"
 	"stellarbill-backend/internal/handlers"
 	"stellarbill-backend/internal/middleware"
@@ -94,6 +95,9 @@ func Register(r *gin.Engine) {
 	// Statement service wiring (in-memory mock for test/dev)
 	stmtRepo := repository.NewMockStatementRepo()
 	stmtSvc := service.NewStatementService(rawSubRepo, stmtRepo)
+
+	// Create handlers
+	h := handlers.NewHandlerWithDependencies(nil, nil, dbPool, nil)
 
 	// Admin handler receives the cached repos so PurgeCache can invalidate them.
 	adminToken := os.Getenv("ADMIN_TOKEN")

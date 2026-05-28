@@ -3,9 +3,10 @@ package handlers
 import (
 	"net/http"
 
-    "github.com/gin-gonic/gin"
-    "stellarbill-backend/internal/auth"
-    "stellarbill-backend/internal/reconciliation"
+	"github.com/gin-gonic/gin"
+	"stellarbill-backend/internal/auth"
+	"stellarbill-backend/internal/pagination"
+	"stellarbill-backend/internal/reconciliation"
 )
 
 // NewReconcileHandler returns a handler that accepts a list of backend subscriptions
@@ -86,47 +87,11 @@ func NewReconcileHandler(adapter reconciliation.Adapter, store reconciliation.St
             }
         }
 
-		snaps, err := adapter.FetchSnapshots(c.Request.Context())
-		if err != nil {
-			RespondWithInternalError(c, "Failed to fetch reconciliation snapshots")
-			return
-		}
-
-		// Build snapshot map scoped to the caller's tenant for non-admin.
-		snapMap := make(map[string]*reconciliation.Snapshot, len(snaps))
-		for i := range snaps {
-			s := snaps[i]
-			if !isAdmin && s.TenantID != tid {
-				continue
-			}
-			snapMap[s.SubscriptionID] = &s
-		}
-
-		reconciler := reconciliation.New()
-		reports := make([]reconciliation.Report, 0, len(backendSubs))
-		for _, b := range backendSubs {
-			rep := reconciler.Compare(b, snapMap[b.SubscriptionID])
-			reports = append(reports, rep)
-		}
-
-		matched := 0
-		for _, r := range reports {
-			if r.Matched {
-				matched++
-			}
-		}
-
-		if store != nil {
-			if err := store.SaveReports(reports); err != nil {
-				c.Header("X-Reconcile-Save-Error", err.Error())
-			}
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"summary": gin.H{"total": len(reports), "matched": matched, "mismatched": len(reports) - matched},
-			"reports": reports,
-		})
-	}
+        c.JSON(http.StatusOK, gin.H{
+            "summary": gin.H{"total": len(reports), "matched": matched, "mismatched": len(reports) - matched},
+            "reports": reports,
+        })
+    }
 }
 
 // NewListReportsHandler returns a handler that lists reconciliation reports.
@@ -159,7 +124,7 @@ func NewListReportsHandler(store reconciliation.Store) gin.HandlerFunc {
 		cursorStr := c.Query("cursor")
 		cursor, err := pagination.DecodeScopedCursor(cursorStr, tid)
 		if err != nil {
-			RespondWithValidationError(c, "Invalid pagination cursor", map[string]interface{}{
+			RespondWithErrorDetails(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Invalid pagination cursor", map[string]interface{}{
 				"reason": err.Error(),
 			})
 			return
@@ -168,7 +133,7 @@ func NewListReportsHandler(store reconciliation.Store) gin.HandlerFunc {
 		limitStr := c.Query("limit")
 		limit, err := pagination.ParseLimit(limitStr, 20)
 		if err != nil {
-			RespondWithValidationError(c, "Invalid pagination limit", map[string]interface{}{
+			RespondWithErrorDetails(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Invalid pagination limit", map[string]interface{}{
 				"reason": err.Error(),
 			})
 			return
