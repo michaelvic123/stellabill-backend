@@ -80,8 +80,8 @@ func RequirePermission(permission Permission) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roles := ExtractRoles(c)
 		if len(roles) == 0 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "missing role - ensure JWT middleware is applied",
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "insufficient permissions",
 			})
 			return
 		}
@@ -97,7 +97,7 @@ func RequirePermission(permission Permission) gin.HandlerFunc {
 
 		if len(roles) > 0 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "insufficient permissions for this operation",
+				"error": "insufficient permissions",
 			})
 			return
 		}

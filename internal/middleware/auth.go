@@ -85,7 +85,7 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// 3. Tenant ID enforcement (Preserving your existing logic)
+		// 3. Tenant ID enforcement
 		tenantHeader := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
 		tenantClaim := ""
 		if v, ok := claims["tenant"]; ok {
@@ -105,6 +105,13 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 			tenantID = tenantHeader
 		} else if tenantClaim != "" {
 			tenantID = tenantClaim
+		}
+
+		// 4. Extract role from claims and set in context for RequirePermission
+		if roleVal, ok := claims["role"]; ok {
+			if roleStr, ok := roleVal.(string); ok && roleStr != "" {
+				c.Set(auth.RolesContextKey, roleStr)
+			}
 		}
 
 		c.Set("callerID", sub)

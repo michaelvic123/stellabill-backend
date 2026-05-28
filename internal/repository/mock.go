@@ -16,6 +16,15 @@ func NewMockSubscriptionRepo(rows ...*SubscriptionRow) *MockSubscriptionRepo {
 	return m
 }
 
+// All returns every row in the mock repo.
+func (m *MockSubscriptionRepo) All() []*SubscriptionRow {
+	out := make([]*SubscriptionRow, 0, len(m.records))
+	for _, r := range m.records {
+		out = append(out, r)
+	}
+	return out
+}
+
 // FindByID returns the SubscriptionRow with the given ID, or ErrNotFound.
 func (m *MockSubscriptionRepo) FindByID(_ context.Context, id string) (*SubscriptionRow, error) {
 	row, ok := m.records[id]

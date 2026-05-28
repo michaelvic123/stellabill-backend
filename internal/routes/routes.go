@@ -85,7 +85,11 @@ func Register(r *gin.Engine) {
 	const repoCacheTTL = 5 * time.Minute
 
 	rawPlanRepo := repository.NewMockPlanRepo()
-	rawSubRepo := repository.NewMockSubscriptionRepo()
+	rawSubRepo := repository.NewMockSubscriptionRepo(
+		&repository.SubscriptionRow{ID: "sub-123", TenantID: "", CustomerID: "c1", Status: "active", PlanID: "p1"},
+		&repository.SubscriptionRow{ID: "sub-456", TenantID: "", CustomerID: "c2", Status: "active", PlanID: "p1"},
+		&repository.SubscriptionRow{ID: "test123", TenantID: "", CustomerID: "c3", Status: "active", PlanID: "p1"},
+	)
 
 	cachedPlanRepo := repository.NewCachedPlanRepo(rawPlanRepo, planCache, repoCacheTTL)
 	cachedSubRepo := repository.NewCachedSubscriptionRepo(rawSubRepo, subCache, repoCacheTTL)
@@ -96,8 +100,13 @@ func Register(r *gin.Engine) {
 	stmtRepo := repository.NewMockStatementRepo()
 	stmtSvc := service.NewStatementService(rawSubRepo, stmtRepo)
 
+	// handlerSubSvc adapts the mock repo to satisfy handlers.SubscriptionService.
+	handlerSubSvc := &mockHandlerSubSvc{repo: rawSubRepo}
+	// handlerPlanSvc adapts the cached plan repo to satisfy handlers.PlanService.
+	handlerPlanSvc := &mockHandlerPlanSvc{repo: cachedPlanRepo}
+
 	// Create handlers
-	h := handlers.NewHandlerWithDependencies(nil, nil, dbPool, nil)
+	h := handlers.NewHandlerWithDependencies(handlerPlanSvc, handlerSubSvc, dbPool, nil)
 
 	// Admin handler receives the cached repos so PurgeCache can invalidate them.
 	adminToken := os.Getenv("ADMIN_TOKEN")
@@ -120,8 +129,8 @@ func Register(r *gin.Engine) {
 	// V1 routes are all protected
 	v1.Use(authMiddleware)
 	{
-		v1.GET("/subscriptions", h.ListSubscriptions)
-		v1.GET("/subscriptions/:id", handlers.NewGetSubscriptionHandler(svc))
+		v1.GET("/subscriptions", auth.RequirePermission(auth.PermReadSubscriptions), h.ListSubscriptions)
+		v1.GET("/subscriptions/:id", auth.RequirePermission(auth.PermReadSubscriptions), h.GetSubscription)
 		v1.POST("/subscriptions/:id/status", auth.RequirePermission(auth.PermManageSubscriptions), handlers.NewChangeSubscriptionStatusHandler(svc))
 		v1.GET("/plans", h.ListPlans)
 		v1.GET("/statements/:id", handlers.NewGetStatementHandler(stmtSvc))
@@ -173,4 +182,66 @@ func Register(r *gin.Engine) {
 		admin.POST("/reconcile", auth.RequirePermission(auth.PermManageSubscriptions), idemMiddleware, handlers.NewReconcileHandler(adapter, reconStore))
 		admin.GET("/reports", auth.RequirePermission(auth.PermReadReconciliation), handlers.NewListReportsHandler(reconStore))
 	}
+}
+
+// mockHandlerSubSvc adapts *repository.MockSubscriptionRepo to handlers.SubscriptionService.
+type mockHandlerSubSvc struct {
+	repo *repository.MockSubscriptionRepo
+}
+
+func (m *mockHandlerSubSvc) ListSubscriptions(_ *gin.Context) ([]handlers.Subscription, error) {
+	rows := m.repo.All()
+	out := make([]handlers.Subscription, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, handlers.Subscription{
+			ID:          r.ID,
+			PlanID:      r.PlanID,
+			Customer:    r.CustomerID,
+			Status:      r.Status,
+			Amount:      r.Amount,
+			Interval:    r.Interval,
+			NextBilling: r.NextBilling,
+		})
+	}
+	return out, nil
+}
+
+func (m *mockHandlerSubSvc) GetSubscription(_ *gin.Context, id string) (*handlers.Subscription, error) {
+	r, err := m.repo.FindByID(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	return &handlers.Subscription{
+		ID:          r.ID,
+		PlanID:      r.PlanID,
+		Customer:    r.CustomerID,
+		Status:      r.Status,
+		Amount:      r.Amount,
+		Interval:    r.Interval,
+		NextBilling: r.NextBilling,
+	}, nil
+}
+
+// mockHandlerPlanSvc adapts a PlanRepository to handlers.PlanService.
+type mockHandlerPlanSvc struct {
+	repo repository.PlanRepository
+}
+
+func (m *mockHandlerPlanSvc) ListPlans(_ *gin.Context) ([]handlers.Plan, error) {
+	rows, err := m.repo.List(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]handlers.Plan, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, handlers.Plan{
+			ID:          r.ID,
+			Name:        r.Name,
+			Amount:      r.Amount,
+			Currency:    r.Currency,
+			Interval:    r.Interval,
+			Description: r.Description,
+		})
+	}
+	return out, nil
 }
