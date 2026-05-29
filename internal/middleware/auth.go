@@ -27,7 +27,6 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		fmt.Printf("DEBUG: AuthMiddleware entered for path %s\n", c.Request.URL.Path)
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			respondAuthError(c, "missing authorization header")
@@ -36,7 +35,9 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			respondAuthError(c, "authorization header must be Bearer token")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "authorization header must be Bearer token",
+			})
 			return
 		}
 
@@ -72,23 +73,31 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// 2. Extract Claims
+		// Extract Claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			respondAuthError(c, "invalid token claims")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid token claims",
+			})
 			return
 		}
 
 		sub, err := claims.GetSubject()
 		if err != nil || sub == "" {
-			respondAuthError(c, "token missing subject claim")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "token missing subject claim",
+			})
 			return
 		}
 
 		// 3. Tenant ID enforcement
 		tenantHeader := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
 		tenantClaim := ""
-		if v, ok := claims["tenant"]; ok {
+		if v, ok := claims["tenant_id"]; ok {
+			if ts, ok := v.(string); ok {
+				tenantClaim = strings.TrimSpace(ts)
+			}
+		} else if v, ok := claims["tenant"]; ok {
 			if ts, ok := v.(string); ok {
 				tenantClaim = strings.TrimSpace(ts)
 			}
@@ -97,7 +106,9 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 		var tenantID string
 		if tenantHeader != "" && tenantClaim != "" {
 			if tenantHeader != tenantClaim {
-				respondAuthError(c, "tenant mismatch")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "tenant mismatch",
+				})
 				return
 			}
 			tenantID = tenantHeader
@@ -114,8 +125,61 @@ func AuthMiddleware(cache interface{}, jwtSecret string) gin.HandlerFunc {
 			}
 		}
 
+		// Project claims into gin context for downstream handlers
+		c.Set(auth.RolesContextKey, roles)
 		c.Set("callerID", sub)
 		c.Set("tenantID", tenantID)
+		
 		c.Next()
 	}
+}
+
+// extractRolesFromClaims extracts and normalizes roles from JWT claims
+// Handles both single role (string) and multiple roles ([]string or []interface{})
+func extractRolesFromClaims(claims jwt.MapClaims) []auth.Role {
+	var roles []auth.Role
+
+	// Try to extract "roles" claim (array)
+	if v, ok := claims["roles"]; ok {
+		switch typed := v.(type) {
+		case []string:
+			for _, role := range typed {
+				if trimmed := strings.TrimSpace(role); trimmed != "" {
+					roles = append(roles, auth.Role(trimmed))
+				}
+			}
+		case []interface{}:
+			for _, role := range typed {
+				if roleStr, ok := role.(string); ok {
+					if trimmed := strings.TrimSpace(roleStr); trimmed != "" {
+						roles = append(roles, auth.Role(trimmed))
+					}
+				}
+			}
+		case []auth.Role:
+			roles = typed
+		}
+	}
+
+	// If no roles found, try "role" claim (single string)
+	if len(roles) == 0 {
+		if v, ok := claims["role"]; ok {
+			switch typed := v.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(typed); trimmed != "" {
+					roles = append(roles, auth.Role(trimmed))
+				}
+			case auth.Role:
+				if trimmed := strings.TrimSpace(string(typed)); trimmed != "" {
+					roles = append(roles, typed)
+				}
+			}
+		}
+	}
+
+	// Normalize roles using the existing auth.ExtractRoles logic
+	// Create a temporary gin context to use the existing normalization function
+	tempCtx := &gin.Context{}
+	tempCtx.Set(auth.RolesContextKey, roles)
+	return auth.ExtractRoles(tempCtx)
 }
