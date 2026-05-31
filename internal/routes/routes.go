@@ -11,7 +11,9 @@ import (
 	"stellarbill-backend/internal/auth"
 	"stellarbill-backend/internal/cache"
 	"stellarbill-backend/internal/config"
+	"stellarbill-backend/internal/db"
 	"stellarbill-backend/internal/handlers"
+	"stellarbill-backend/internal/metrics"
 	"stellarbill-backend/internal/middleware"
 	"stellarbill-backend/internal/outbox"
 	"stellarbill-backend/internal/reconciliation"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
@@ -53,8 +56,12 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 	r.Use(middleware.Recovery())
 	r.Use(otelgin.Middleware(cfg.TracingServiceName))
 	r.Use(middleware.TraceIDMiddleware())
+	r.Use(metrics.MetricsMiddleware())
 
 	r.Use(middleware.CORS(cfg.Env, cfg.AllowedOrigins))
+
+	// Metrics endpoint with IP restriction
+	r.GET("/metrics", middleware.IPRestrictionMiddleware(cfg.MetricsAllowedCIDRs), gin.WrapH(promhttp.Handler()))
 
 	// Apply rate limiting middleware
 	rateLimitConfig := middleware.RateLimiterConfig{
@@ -66,18 +73,26 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 	}
 	r.Use(middleware.RateLimitMiddleware(rateLimitConfig))
 
-	var dbPool *pgxpool.Pool
+	var dbPool *db.BreakerPool
+	var rawPool *pgxpool.Pool
 	if cfg.DBConn != "" {
 		var err error
-		dbPool, err = pgxpool.New(context.Background(), cfg.DBConn)
+		rawPool, err = pgxpool.New(context.Background(), cfg.DBConn)
 		if err != nil {
 			fmt.Printf("Failed to initialize database pool: %v\n", err)
+		} else {
+			dbPool = db.NewBreakerPool(
+				rawPool,
+				cfg.DBCircuitBreakerMaxFailures,
+				cfg.DBCircuitBreakerTimeoutSeconds,
+				cfg.DBCircuitBreakerHalfOpenMaxRequests,
+			)
 		}
 	}
 
 	var idemStore middleware.IdempotencyStore
 	if dbPool != nil {
-		idemStore = middleware.NewPostgresIdempotencyStore(dbPool)
+		idemStore = middleware.NewPostgresIdempotencyStore(dbPool.Pool())
 	} else {
 		idemStore = middleware.NewInMemoryIdempotencyStore()
 	}
