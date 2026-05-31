@@ -92,9 +92,10 @@ type Config struct {
 	TracingExporter        string
 	TracingServiceName     string
 	SecurityFrameAncestors string
-	// CORS configuration
-	// Audit configuration
-	AuditLogPath string
+	// Vault configuration
+	VaultAddr       string
+	VaultToken      string
+	VaultPathPrefix string
 }
 
 // ValidationResult holds the result of configuration validation
@@ -178,6 +179,9 @@ var optionalEnvVars = map[string]string{
 	"MAX_GZIP_RATIO":              "10.0",
 	"SECURITY_FRAME_ANCESTORS":    "'none'",
 	"JWKS_URL":                    "",
+	"VAULT_ADDR":                  "",
+	"VAULT_TOKEN":                 "",
+	"VAULT_PATH_PREFIX":           "secret/data/",
 }
 
 // Option configures the Load function.
@@ -204,42 +208,42 @@ var secretKeys = []string{
 
 // Load loads configuration from environment variables with validation.
 // Sensitive values (DATABASE_URL, JWT_SECRET) are fetched through the secrets
-// provider, which defaults to EnvProvider when no option is supplied.
+// provider, which defaults to the auto-configured chain (Vault -> Env) when no option is supplied.
 func Load(opts ...Option) (Config, error) {
 	o := &loadOptions{
-		secretsProvider: secrets.NewEnvProvider(),
+		secretsProvider: secrets.NewDefaultProvider(),
 	}
 	for _, fn := range opts {
 		fn(o)
 	}
 
 	cfg := Config{
-		Env:                                 getEnv("ENV", "development"),
-		Port:                                DefaultPort,
-		DBConn:                              "",
-		JWTSecret:                           "",
-		JWKSURL:                             getEnv("JWKS_URL", ""),
-		MaxHeaderBytes:                      MaxHeaderBytes,
-		MaxRequestSize:                      getEnvInt64("MAX_REQUEST_SIZE", DefaultMaxRequestSize),
-		MaxGzipUncompressed:                 getEnvInt64("MAX_GZIP_UNCOMPRESSED", DefaultMaxGzipUncompressed),
-		MaxGzipRatio:                        getEnvFloat64("MAX_GZIP_RATIO", DefaultMaxGzipRatio),
-		ReadTimeout:                         DefaultReadTimeout,
-		WriteTimeout:                        DefaultWriteTimeout,
-		IdleTimeout:                         DefaultIdleTimeout,
-		TracingExporter:                     getEnv("TRACING_EXPORTER", "stdout"),
-		TracingServiceName:                  getEnv("TRACING_SERVICE_NAME", "stellabill-backend"),
-		AllowedOrigins:                      getEnv("ALLOWED_ORIGINS", ""),
-		SecurityFrameAncestors:              getEnv("SECURITY_FRAME_ANCESTORS", "'none'"),
-		DBPoolMaxConns:                      DefaultDBPoolMaxConns,
-		DBPoolMinConns:                      DefaultDBPoolMinConns,
-		DBPoolMaxConnLifetime:               DefaultDBPoolMaxConnLifetime,
-		DBPoolMaxConnIdleTime:               DefaultDBPoolMaxConnIdleTime,
-		DBPoolConnectTimeout:                DefaultDBPoolConnectTimeout,
-		DBPoolHealthCheckPeriod:             DefaultDBPoolHealthCheckPeriod,
-		DBPoolMetricsInterval:               DefaultDBPoolMetricsInterval,
-		DBCircuitBreakerMaxFailures:         5,
-		DBCircuitBreakerTimeoutSeconds:      30,
-		DBCircuitBreakerHalfOpenMaxRequests: 1,
+		Env:                 getEnv("ENV", "development"),
+		Port:                DefaultPort,
+		DBConn:              "",
+		JWTSecret:           "",
+		JWKSURL:             getEnv("JWKS_URL", ""),
+		MaxHeaderBytes:      MaxHeaderBytes,
+		MaxRequestSize:      getEnvInt64("MAX_REQUEST_SIZE", DefaultMaxRequestSize),
+		MaxGzipUncompressed: getEnvInt64("MAX_GZIP_UNCOMPRESSED", DefaultMaxGzipUncompressed),
+		MaxGzipRatio:        getEnvFloat64("MAX_GZIP_RATIO", DefaultMaxGzipRatio),
+		ReadTimeout:         DefaultReadTimeout,
+		WriteTimeout:        DefaultWriteTimeout,
+		IdleTimeout:         DefaultIdleTimeout,
+		TracingExporter:     getEnv("TRACING_EXPORTER", "stdout"),
+		TracingServiceName:  getEnv("TRACING_SERVICE_NAME", "stellabill-backend"),
+		AllowedOrigins:      getEnv("ALLOWED_ORIGINS", ""),
+		SecurityFrameAncestors: getEnv("SECURITY_FRAME_ANCESTORS", "'none'"),
+		DBPoolMaxConns:          DefaultDBPoolMaxConns,
+		DBPoolMinConns:          DefaultDBPoolMinConns,
+		DBPoolMaxConnLifetime:   DefaultDBPoolMaxConnLifetime,
+		DBPoolMaxConnIdleTime:   DefaultDBPoolMaxConnIdleTime,
+		DBPoolConnectTimeout:    DefaultDBPoolConnectTimeout,
+		DBPoolHealthCheckPeriod: DefaultDBPoolHealthCheckPeriod,
+		DBPoolMetricsInterval:   DefaultDBPoolMetricsInterval,
+		VaultAddr:               getEnv("VAULT_ADDR", ""),
+		VaultToken:              getEnv("VAULT_TOKEN", ""),
+		VaultPathPrefix:         getEnv("VAULT_PATH_PREFIX", "secret/data/"),
 	}
 
 	// Resolve secrets through the provider

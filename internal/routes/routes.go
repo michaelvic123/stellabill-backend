@@ -98,19 +98,6 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 	}
 	authMiddleware := middleware.AuthMiddleware(jwksCache, cfg.JWTSecret)
 
-	// Configure audit logging
-	var auditSink audit.Sink
-	if cfg.AuditLogPath != "" {
-		auditSink = audit.NewFileSink(cfg.AuditLogPath)
-	} else {
-		auditSink = audit.NewStderrSink()
-	}
-	auditSecret := os.Getenv("AUDIT_SECRET")
-	if auditSecret == "" {
-		auditSecret = jwtSecret // Fallback to JWT secret for dev
-	}
-	auditLogger := audit.NewLogger(auditSecret, auditSink)
-
 	// Each cached repo gets its own InMemory cache instance so that Flush is
 	// scoped to its namespace and does not evict entries from other caches.
 	planCache := cache.NewInMemory()
