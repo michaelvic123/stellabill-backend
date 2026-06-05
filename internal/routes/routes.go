@@ -11,6 +11,7 @@ import (
 	"stellarbill-backend/internal/auth"
 	"stellarbill-backend/internal/cache"
 	"stellarbill-backend/internal/config"
+	"stellarbill-backend/internal/db"
 	"stellarbill-backend/internal/featureflags"
 	"stellarbill-backend/internal/handlers"
 	"stellarbill-backend/internal/metrics"
@@ -29,6 +30,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
+<<<<<<< Open-and-inject-a-real-database-connection-pool-at-startup
+
+=======
+>>>>>>> main
 
 // Register configures all routes on the provided router.
 func Register(r *gin.Engine) {
@@ -72,10 +77,22 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 	}
 	r.Use(middleware.RateLimitMiddleware(rateLimitConfig))
 
+	// Open a real connection pool from cfg.DBConn, applying the DBPool* tuning
+	// fields. When DATABASE_URL is empty (local dev) NewPool returns (nil, nil)
+	// and we degrade gracefully to in-memory dependencies below.
 	var dbPool *pgxpool.Pool
 	var planDB *sql.DB
 	if cfg.DBConn != "" {
+<<<<<<< Open-and-inject-a-real-database-connection-pool-at-startup
+		connectCtx, cancel := context.WithTimeout(
+			context.Background(),
+			time.Duration(cfg.DBPoolConnectTimeout)*time.Second,
+		)
+		dbPool, err = db.NewPool(connectCtx, cfg)
+		cancel()
+=======
 		poolConfig, err := pgxpool.ParseConfig(cfg.DBConn)
+>>>>>>> main
 		if err != nil {
 			fmt.Printf("Failed to parse database pool config: %v\n", err)
 		} else {
@@ -165,8 +182,14 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 	// handlerPlanSvc adapts the cached plan repo to satisfy handlers.PlanService.
 	handlerPlanSvc := &mockHandlerPlanSvc{repo: cachedPlanRepo}
 
-	// Create handlers
-	h := handlers.NewHandlerWithDependencies(handlerPlanSvc, handlerSubSvc, dbPool, nil)
+	// Create handlers. The pool is wrapped in a PoolPinger so it satisfies
+	// handlers.DBPinger (pgxpool exposes Ping, the health check wants
+	// PingContext); readiness probes stay "not_configured" when no pool exists.
+	var dbHealth handlers.DBPinger
+	if dbPool != nil {
+		dbHealth = &db.PoolPinger{Pool: dbPool}
+	}
+	h := handlers.NewHandlerWithDependencies(handlerPlanSvc, handlerSubSvc, dbHealth, nil)
 
 	// Admin handler receives the cached repos so PurgeCache can invalidate them.
 	adminToken := os.Getenv("ADMIN_TOKEN")
