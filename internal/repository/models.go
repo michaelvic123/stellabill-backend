@@ -14,6 +14,7 @@ type SubscriptionRow struct {
 	Interval    string
 	NextBilling string // RFC 3339 or empty
 	DeletedAt   *time.Time
+	CancelAt    *time.Time // scheduled future cancellation; nil means not scheduled
 }
 
 // PlanRow is the raw DB record for a billing plan.

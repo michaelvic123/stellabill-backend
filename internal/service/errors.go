@@ -23,4 +23,7 @@ var (
 
 	// ErrUnknownCurrentState is returned when persisted subscription state is outside the known graph.
 	ErrUnknownCurrentState = errors.New("unknown subscription state")
+
+	// ErrCancelAtPast is returned when cancel_at is not strictly in the future.
+	ErrCancelAtPast = errors.New("cancel_at must be in the future")
 )

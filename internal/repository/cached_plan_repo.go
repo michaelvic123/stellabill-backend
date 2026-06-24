@@ -32,7 +32,6 @@ type CachedPlanRepo struct {
 	stales        uint64
 	invalidatedAt sync.Map
 	inflight      sync.Map // map[string]*inflightLoad
-	sf            singleflight.Group
 }
 
 // NewCachedPlanRepo constructs a CachedPlanRepo.
@@ -113,13 +112,21 @@ func (cpr *CachedPlanRepo) FindByID(ctx context.Context, id string) (*PlanRow, e
 	if err != nil {
 		return nil, err
 	}
+	if cpr.cache != nil {
+		if data, marshalErr := json.Marshal(pr); marshalErr == nil {
+			env := cacheEnvelope{Data: data, StoredAt: time.Now()}
+			if envBytes, marshalErr := json.Marshal(env); marshalErr == nil {
+				_ = cpr.cache.Set(ctx, key, envBytes, cpr.ttl)
+			}
+		}
+	}
 	return pr, nil
 }
 
 // List returns all plans. It caches the full list under a single key.
 func (cpr *CachedPlanRepo) List(ctx context.Context) ([]*PlanRow, error) {
 	key := cpr.listKey()
-	
+
 	// Attempt cache fetch for list
 	if cpr.cache != nil {
 		if val, err := cpr.cache.Get(ctx, key); err == nil && val != nil {
@@ -133,26 +140,20 @@ func (cpr *CachedPlanRepo) List(ctx context.Context) ([]*PlanRow, error) {
 					stale = true
 				}
 			}
-			if stale {
-				atomic.AddUint64(&cpr.stales, 1)
-				_ = cpr.cache.Delete(ctx, key)
-			} else {
+			if !stale {
 				var out []*PlanRow
 				if unmarshalErr := json.Unmarshal(env.Data, &out); unmarshalErr == nil {
 					atomic.AddUint64(&cpr.hits, 1)
 					return out, nil
-				} else {
-					// Corrupted envelope JSON
-					return nil, fmt.Errorf("corrupted cache envelope: %w", err)
 				}
-					return nil, fmt.Errorf("corrupted cache envelope: %w", err)
-				}
-				return nil, fmt.Errorf("corrupted cache data: %w", err)
+			} else {
+				atomic.AddUint64(&cpr.stales, 1)
+				_ = cpr.cache.Delete(ctx, key)
 			}
 		}
 	}
 
-	// Cache miss, use singleflight for list
+	// Cache miss — deduplicate concurrent loads via inflight map.
 	atomic.AddUint64(&cpr.misses, 1)
 	load := &inflightLoad{}
 	load.wg.Add(1)
@@ -177,9 +178,6 @@ func (cpr *CachedPlanRepo) List(ctx context.Context) ([]*PlanRow, error) {
 	out, err := cpr.backend.List(ctx)
 	load.row = out
 	load.err = err
-		return out, nil
-	})
-	
 	if err != nil {
 		return nil, err
 	}

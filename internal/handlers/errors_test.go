@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -29,6 +30,14 @@ func (m *mockErrorService) GetDetail(_ context.Context, _, _, _ string) (*servic
 }
 
 func (m *mockErrorService) ChangeStatus(ctx context.Context, tenantID string, actorID string, subscriptionID string, targetStatus string) (*service.SubscriptionStatusChange, error) {
+	return nil, nil
+}
+
+func (m *mockErrorService) ScheduleCancel(_ context.Context, _, _, _ string, _ time.Time) (*service.ScheduledCancellationDetail, error) {
+	return nil, nil
+}
+
+func (m *mockErrorService) UnscheduleCancel(_ context.Context, _, _, _ string) (*service.ScheduledCancellationDetail, error) {
 	return nil, nil
 }
 

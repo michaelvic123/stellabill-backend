@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,14 @@ func (m *mockSubscriptionService) GetDetail(_ context.Context, tenantID, callerI
 }
 
 func (m *mockSubscriptionService) ChangeStatus(ctx context.Context, tenantID string, actorID string, subscriptionID string, targetStatus string) (*service.SubscriptionStatusChange, error) {
+	return nil, nil
+}
+
+func (m *mockSubscriptionService) ScheduleCancel(_ context.Context, _, _, _ string, _ time.Time) (*service.ScheduledCancellationDetail, error) {
+	return nil, nil
+}
+
+func (m *mockSubscriptionService) UnscheduleCancel(_ context.Context, _, _, _ string) (*service.ScheduledCancellationDetail, error) {
 	return nil, nil
 }
 

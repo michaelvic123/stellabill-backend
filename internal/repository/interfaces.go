@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ErrNotFound is returned when a requested record does not exist.
@@ -13,6 +14,8 @@ type SubscriptionRepository interface {
 	FindByID(ctx context.Context, id string) (*SubscriptionRow, error)
 	FindByIDAndTenant(ctx context.Context, id string, tenantID string) (*SubscriptionRow, error)
 	UpdateStatus(ctx context.Context, id string, tenantID string, status string) error
+	ScheduleCancel(ctx context.Context, id string, tenantID string, cancelAt time.Time) error
+	UnscheduleCancel(ctx context.Context, id string, tenantID string) error
 }
 
 // PlanRepository is the read interface used by the service.

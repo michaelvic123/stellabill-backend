@@ -220,6 +220,8 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 		v1.GET("/subscriptions", auth.RequirePermission(auth.PermReadSubscriptions), h.ListSubscriptions)
 		v1.GET("/subscriptions/:id", auth.RequirePermission(auth.PermReadSubscriptions), h.GetSubscription)
 		v1.POST("/subscriptions/:id/status", auth.RequirePermission(auth.PermManageSubscriptions), handlers.NewChangeSubscriptionStatusHandler(svc))
+		v1.POST("/subscriptions/:id/cancel-schedule", auth.RequirePermission(auth.PermManageSubscriptions), handlers.NewScheduleCancelHandler(svc))
+		v1.DELETE("/subscriptions/:id/cancel-schedule", auth.RequirePermission(auth.PermManageSubscriptions), handlers.NewUnscheduleCancelHandler(svc))
 		v1.GET("/plans", h.ListPlans)
 		v1.GET("/statements/:id", handlers.NewGetStatementHandler(stmtSvc))
 		v1.GET("/statements", handlers.NewListStatementsHandler(stmtSvc))
@@ -257,6 +259,16 @@ func RegisterWithCleanup(r *gin.Engine) func(context.Context) error {
 			dep,
 			auth.RequirePermission(auth.PermManageSubscriptions),
 			handlers.NewChangeSubscriptionStatusHandler(svc),
+		)
+		apiProtected.POST("/subscriptions/:id/cancel-schedule",
+			dep,
+			auth.RequirePermission(auth.PermManageSubscriptions),
+			handlers.NewScheduleCancelHandler(svc),
+		)
+		apiProtected.DELETE("/subscriptions/:id/cancel-schedule",
+			dep,
+			auth.RequirePermission(auth.PermManageSubscriptions),
+			handlers.NewUnscheduleCancelHandler(svc),
 		)
 
 		apiProtected.GET("/statements/:id", handlers.NewGetStatementHandler(stmtSvc))

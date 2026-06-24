@@ -21,26 +21,14 @@ func NewPostgresSubscriptionRepo(db *sql.DB) *PostgresSubscriptionRepo {
 // FindByID queries subscriptions by id only.
 // It returns ErrNotFound when there is no matching record.
 func (r *PostgresSubscriptionRepo) FindByID(ctx context.Context, id string) (*SubscriptionRow, error) {
-    const query = `
-        SELECT id, plan_id, tenant_id, customer_id, status, amount, currency, interval,
-               next_billing, deleted_at
-        FROM subscriptions
-        WHERE id = $1
-    `
-
+    const query = `SELECT id, plan_id, tenant_id, customer_id, status, amount, currency, interval, next_billing, deleted_at FROM subscriptions WHERE id = $1`
     return r.fetchSubscription(ctx, query, id)
 }
 
 // FindByIDAndTenant queries subscriptions by id and tenant_id in SQL.
 // Tenant isolation is enforced in the database predicate, not in Go.
 func (r *PostgresSubscriptionRepo) FindByIDAndTenant(ctx context.Context, id string, tenantID string) (*SubscriptionRow, error) {
-    const query = `
-        SELECT id, plan_id, tenant_id, customer_id, status, amount, currency, interval,
-               next_billing, deleted_at
-        FROM subscriptions
-        WHERE id = $1 AND tenant_id = $2
-    `
-
+    const query = `SELECT id, plan_id, tenant_id, customer_id, status, amount, currency, interval, next_billing, deleted_at FROM subscriptions WHERE id = $1 AND tenant_id = $2`
     return r.fetchSubscription(ctx, query, id, tenantID)
 }
 
@@ -58,6 +46,48 @@ func (r *PostgresSubscriptionRepo) UpdateStatus(ctx context.Context, id string, 
         return err
     }
 
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        return err
+    }
+    if rowsAffected == 0 {
+        return ErrNotFound
+    }
+    return nil
+}
+
+// ScheduleCancel stores a future cancellation timestamp on the subscription.
+func (r *PostgresSubscriptionRepo) ScheduleCancel(ctx context.Context, id string, tenantID string, cancelAt time.Time) error {
+    const query = `
+        UPDATE subscriptions
+        SET cancel_at = $1
+        WHERE id = $2 AND tenant_id = $3
+    `
+    result, err := r.db.ExecContext(ctx, query, cancelAt.UTC(), id, tenantID)
+    if err != nil {
+        return err
+    }
+    rowsAffected, err := result.RowsAffected()
+    if err != nil {
+        return err
+    }
+    if rowsAffected == 0 {
+        return ErrNotFound
+    }
+    return nil
+}
+
+// UnscheduleCancel clears any pending scheduled cancellation.
+func (r *PostgresSubscriptionRepo) UnscheduleCancel(ctx context.Context, id string, tenantID string) error {
+    const query = `
+        UPDATE subscriptions
+        SET cancel_at = NULL
+        WHERE id = $1 AND tenant_id = $2
+    `
+    result, err := r.db.ExecContext(ctx, query, id, tenantID)
+    if err != nil {
+        return err
+    }
     rowsAffected, err := result.RowsAffected()
     if err != nil {
         return err

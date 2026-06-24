@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
@@ -214,6 +215,100 @@ func getRequiredStringContextValue(c *gin.Context, key string, missingMessage st
 	}
 
 	return str, true
+}
+
+type scheduleCancelRequest struct {
+	CancelAt string `json:"cancel_at"` // RFC 3339
+}
+
+// NewScheduleCancelHandler returns a handler that schedules a future cancellation.
+// Caller must be subscriber or merchant (enforced by RBAC at the route level).
+func NewScheduleCancelHandler(svc service.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			RespondWithInternalError(c, "Subscription service is unavailable")
+			return
+		}
+
+		ctx, span := otel.Tracer(subsTracerName).Start(c.Request.Context(), "handler.ScheduleCancel",
+			trace.WithAttributes(attribute.String("subscription.id", c.Param("id"))))
+		defer span.End()
+		c.Request = c.Request.WithContext(ctx)
+
+		tenantID, ok := getRequiredStringContextValue(c, "tenantID", "Missing tenant context")
+		if !ok {
+			return
+		}
+		callerID := c.GetString("callerID")
+
+		var req scheduleCancelRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			RespondWithErrorDetails(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Invalid request body", map[string]interface{}{
+				"reason": err.Error(),
+			})
+			return
+		}
+		if req.CancelAt == "" {
+			RespondWithError(c, http.StatusUnprocessableEntity, ErrorCodeValidationFailed, "cancel_at is required")
+			return
+		}
+
+		cancelAt, err := time.Parse(time.RFC3339, req.CancelAt)
+		if err != nil {
+			RespondWithError(c, http.StatusUnprocessableEntity, ErrorCodeValidationFailed, "cancel_at must be a valid RFC 3339 timestamp")
+			return
+		}
+
+		result, err := svc.ScheduleCancel(c.Request.Context(), tenantID, callerID, c.Param("id"), cancelAt)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrCancelAtPast):
+				RespondWithError(c, http.StatusUnprocessableEntity, ErrorCodeValidationFailed, err.Error())
+			default:
+				status, code, message := MapServiceErrorToResponse(err)
+				RespondWithError(c, status, code, message)
+			}
+			return
+		}
+
+		c.JSON(http.StatusOK, service.ResponseEnvelope{
+			APIVersion: "v1",
+			Data:       result,
+		})
+	}
+}
+
+// NewUnscheduleCancelHandler returns a handler that clears a scheduled cancellation.
+func NewUnscheduleCancelHandler(svc service.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil {
+			RespondWithInternalError(c, "Subscription service is unavailable")
+			return
+		}
+
+		ctx, span := otel.Tracer(subsTracerName).Start(c.Request.Context(), "handler.UnscheduleCancel",
+			trace.WithAttributes(attribute.String("subscription.id", c.Param("id"))))
+		defer span.End()
+		c.Request = c.Request.WithContext(ctx)
+
+		tenantID, ok := getRequiredStringContextValue(c, "tenantID", "Missing tenant context")
+		if !ok {
+			return
+		}
+		callerID := c.GetString("callerID")
+
+		result, err := svc.UnscheduleCancel(c.Request.Context(), tenantID, callerID, c.Param("id"))
+		if err != nil {
+			status, code, message := MapServiceErrorToResponse(err)
+			RespondWithError(c, status, code, message)
+			return
+		}
+
+		c.JSON(http.StatusOK, service.ResponseEnvelope{
+			APIVersion: "v1",
+			Data:       result,
+		})
+	}
 }
 
 // ListSubscriptions is a package-level helper for backwards compatibility / benchmark tests.

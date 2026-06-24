@@ -3,7 +3,6 @@ package outbox
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -165,6 +164,56 @@ func (r *PostgresPgxRepository) DeleteCompletedEvents(olderThan time.Time) (int6
 		return 0, fmt.Errorf("failed to delete completed events: %w", err)
 	}
 	return result.RowsAffected(), nil
+}
+
+// ListDeadLetteredEvents returns events that have exceeded max retries.
+func (r *PostgresPgxRepository) ListDeadLetteredEvents(limit int) ([]*Event, error) {
+	ctx := context.Background()
+	query := `
+		SELECT id, event_type, event_data, aggregate_id, aggregate_type,
+		       occurred_at, status, retry_count, max_retries, next_retry_at,
+		       error_message, created_at, updated_at, version, deduplication_id
+		FROM outbox_events
+		WHERE status = $1 AND retry_count >= max_retries
+		ORDER BY occurred_at ASC
+		LIMIT $2`
+
+	rows, err := r.pool.Query(ctx, query, StatusFailed, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list dead-lettered events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*Event
+	for rows.Next() {
+		event, err := r.scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating dead-lettered events: %w", err)
+	}
+	return events, nil
+}
+
+// RequeueEvent resets a failed event back to pending so it can be retried.
+func (r *PostgresPgxRepository) RequeueEvent(id uuid.UUID) error {
+	ctx := context.Background()
+	query := `
+		UPDATE outbox_events
+		SET status = $1, retry_count = 0, next_retry_at = NULL, error_message = NULL, updated_at = $2
+		WHERE id = $3`
+
+	result, err := r.pool.Exec(ctx, query, StatusPending, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("failed to requeue event: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("event not found: %s", id)
+	}
+	return nil
 }
 
 // scanEvent scans a pgx row into an Event struct

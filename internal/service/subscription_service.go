@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"stellarbill-backend/internal/repository"
 	"stellarbill-backend/internal/security"
@@ -24,6 +25,8 @@ const svcTracerName = "service/subscriptions"
 type SubscriptionService interface {
 	GetDetail(ctx context.Context, tenantID string, callerID string, subscriptionID string) (*SubscriptionDetail, []string, error)
 	ChangeStatus(ctx context.Context, tenantID string, actorID string, subscriptionID string, targetStatus string) (*SubscriptionStatusChange, error)
+	ScheduleCancel(ctx context.Context, tenantID string, callerID string, subscriptionID string, cancelAt time.Time) (*ScheduledCancellationDetail, error)
+	UnscheduleCancel(ctx context.Context, tenantID string, callerID string, subscriptionID string) (*ScheduledCancellationDetail, error)
 }
 
 // subscriptionService is the concrete implementation of SubscriptionService.
@@ -133,6 +136,8 @@ func (s *subscriptionService) GetDetail(ctx context.Context, tenantID string, ca
 }
 
 // ChangeStatus validates and persists a tenant-scoped subscription status change.
+// If the subscription has a scheduled cancellation (CancelAt) and now >= CancelAt,
+// the cancellation is applied automatically regardless of the requested target status.
 func (s *subscriptionService) ChangeStatus(ctx context.Context, tenantID string, actorID string, subscriptionID string, targetStatus string) (*SubscriptionStatusChange, error) {
 	ctx, span := otel.Tracer(svcTracerName).Start(ctx, "SubscriptionService.ChangeStatus",
 		trace.WithAttributes(
@@ -155,6 +160,11 @@ func (s *subscriptionService) ChangeStatus(ctx context.Context, tenantID string,
 
 	if row.DeletedAt != nil {
 		return nil, ErrDeleted
+	}
+
+	// Fire scheduled cancellation when the window has arrived.
+	if row.CancelAt != nil && !time.Now().Before(*row.CancelAt) {
+		targetStatus = subscriptions.StatusCancelled
 	}
 
 	if !subscriptions.IsKnownStatus(targetStatus) {
@@ -184,5 +194,96 @@ func (s *subscriptionService) ChangeStatus(ctx context.Context, tenantID string,
 		PreviousStatus: previousStatus,
 		Status:         targetStatus,
 		Changed:        changed,
+	}, nil
+}
+
+// ScheduleCancel sets a future timestamp at which the subscription will be
+// automatically cancelled on the next charge attempt. The caller must be the
+// subscriber (CustomerID) or a merchant/admin (any non-empty actorID is accepted
+// here; HTTP-layer RBAC enforces role restrictions). cancelAt must be strictly
+// in the future.
+func (s *subscriptionService) ScheduleCancel(ctx context.Context, tenantID string, callerID string, subscriptionID string, cancelAt time.Time) (*ScheduledCancellationDetail, error) {
+	ctx, span := otel.Tracer(svcTracerName).Start(ctx, "SubscriptionService.ScheduleCancel",
+		trace.WithAttributes(
+			attribute.String("subscription.id", subscriptionID),
+			attribute.String("tenant.id", tenantID),
+			attribute.String("caller.id", callerID),
+		))
+	defer span.End()
+
+	if !time.Now().Before(cancelAt) {
+		return nil, ErrCancelAtPast
+	}
+
+	row, err := s.subRepo.FindByIDAndTenant(ctx, subscriptionID, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	if row.DeletedAt != nil {
+		return nil, ErrDeleted
+	}
+
+	// Only subscriber or merchant (non-empty callerID) may schedule.
+	if callerID == "" {
+		return nil, ErrForbidden
+	}
+
+	if err := s.subRepo.ScheduleCancel(ctx, subscriptionID, tenantID, cancelAt); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	ts := cancelAt.UTC().Format(time.RFC3339)
+	return &ScheduledCancellationDetail{
+		SubscriptionID: subscriptionID,
+		CancelAt:       &ts,
+		ScheduledBy:    callerID,
+	}, nil
+}
+
+// UnscheduleCancel clears any pending scheduled cancellation. Safe to call even
+// if no cancellation was scheduled (idempotent).
+func (s *subscriptionService) UnscheduleCancel(ctx context.Context, tenantID string, callerID string, subscriptionID string) (*ScheduledCancellationDetail, error) {
+	ctx, span := otel.Tracer(svcTracerName).Start(ctx, "SubscriptionService.UnscheduleCancel",
+		trace.WithAttributes(
+			attribute.String("subscription.id", subscriptionID),
+			attribute.String("tenant.id", tenantID),
+			attribute.String("caller.id", callerID),
+		))
+	defer span.End()
+
+	if callerID == "" {
+		return nil, ErrForbidden
+	}
+
+	row, err := s.subRepo.FindByIDAndTenant(ctx, subscriptionID, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	if row.DeletedAt != nil {
+		return nil, ErrDeleted
+	}
+
+	if err := s.subRepo.UnscheduleCancel(ctx, subscriptionID, tenantID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return &ScheduledCancellationDetail{
+		SubscriptionID: subscriptionID,
+		CancelAt:       nil,
+		ScheduledBy:    callerID,
 	}, nil
 }

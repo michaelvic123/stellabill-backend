@@ -102,6 +102,32 @@ func (csr *CachedSubscriptionRepo) UpdateStatus(ctx context.Context, id string, 
 	return nil
 }
 
+// ScheduleCancel implements SubscriptionRepository.
+// It delegates to the backend and invalidates the cached keys.
+func (csr *CachedSubscriptionRepo) ScheduleCancel(ctx context.Context, id string, tenantID string, cancelAt time.Time) error {
+	if err := csr.backend.ScheduleCancel(ctx, id, tenantID, cancelAt); err != nil {
+		return err
+	}
+	if csr.cache != nil {
+		_ = csr.cache.Delete(ctx, csr.byIDKey(id))
+		_ = csr.cache.Delete(ctx, csr.byTenantKey(id, tenantID))
+	}
+	return nil
+}
+
+// UnscheduleCancel implements SubscriptionRepository.
+// It delegates to the backend and invalidates the cached keys.
+func (csr *CachedSubscriptionRepo) UnscheduleCancel(ctx context.Context, id string, tenantID string) error {
+	if err := csr.backend.UnscheduleCancel(ctx, id, tenantID); err != nil {
+		return err
+	}
+	if csr.cache != nil {
+		_ = csr.cache.Delete(ctx, csr.byIDKey(id))
+		_ = csr.cache.Delete(ctx, csr.byTenantKey(id, tenantID))
+	}
+	return nil
+}
+
 // Metrics returns hit/miss counters for testing/monitoring.
 func (csr *CachedSubscriptionRepo) Metrics() (hits uint64, misses uint64) {
 	return atomic.LoadUint64(&csr.hits), atomic.LoadUint64(&csr.misses)

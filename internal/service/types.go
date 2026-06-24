@@ -48,6 +48,13 @@ type SubscriptionStatusChange struct {
 	Changed        bool   `json:"changed"`
 }
 
+// ScheduledCancellationDetail is returned after scheduling or clearing a future cancellation.
+type ScheduledCancellationDetail struct {
+	SubscriptionID string  `json:"subscription_id"`
+	CancelAt       *string `json:"cancel_at"` // RFC 3339 UTC; null when cleared
+	ScheduledBy    string  `json:"scheduled_by"`
+}
+
 // StatementDetail is the payload for billing statements.
 type StatementDetail struct {
 	ID             string `json:"id"`

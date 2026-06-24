@@ -62,6 +62,33 @@ func (m *MockSubscriptionRepo) UpdateStatus(_ context.Context, id string, tenant
 	return nil
 }
 
+// ScheduleCancel stores a future cancellation timestamp on the subscription.
+func (m *MockSubscriptionRepo) ScheduleCancel(_ context.Context, id string, tenantID string, cancelAt time.Time) error {
+	row, ok := m.records[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if row.TenantID != tenantID {
+		return ErrNotFound
+	}
+	t := cancelAt.UTC()
+	row.CancelAt = &t
+	return nil
+}
+
+// UnscheduleCancel clears any pending scheduled cancellation on the subscription.
+func (m *MockSubscriptionRepo) UnscheduleCancel(_ context.Context, id string, tenantID string) error {
+	row, ok := m.records[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if row.TenantID != tenantID {
+		return ErrNotFound
+	}
+	row.CancelAt = nil
+	return nil
+}
+
 // MockPlanRepo is an in-memory PlanRepository for testing.
 type MockPlanRepo struct {
 	records map[string]*PlanRow
